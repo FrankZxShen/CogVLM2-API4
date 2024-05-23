@@ -96,6 +96,7 @@ class ChatMessageResponse(BaseModel):
 class DeltaMessage(BaseModel):
     role: Optional[Literal["user", "assistant", "system"]] = None
     content: Optional[str] = None
+    scores: Optional[List[float]] = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -218,6 +219,7 @@ async def predict(model_id: str, params: dict):
         delta = DeltaMessage(
             content=delta_text,
             role="assistant",
+            scores=new_response["softmax_scores"]
         )
         choice_data = ChatCompletionResponseStreamChoice(
             index=0,
