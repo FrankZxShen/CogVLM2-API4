@@ -170,6 +170,16 @@ async def create_chat_completion(request: ChatCompletionRequest):
         stream=request.stream,
         return_string_probabilities=['Yes', 'No'],
         )
+    elif not request.messages[-1].return_string_probabilities:
+        gen_params = dict(
+        messages=request.messages,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        max_tokens=request.max_tokens or 1024,
+        echo=False,
+        stream=request.stream,
+        return_string_probabilities=None,
+        )
 
 
     if request.stream:
@@ -359,50 +369,78 @@ def generate_stream_cogvlm(model: AutoModelForCausalLM, tokenizer: AutoTokenizer
         assert len(token_idx_list) == 1, f'String "{trigger_string}" is tokenized as more than one token!'
         string2idx[trigger_string] = token_idx_list[0]
     
-    with torch.no_grad():
-        # # 获取模型的输出 logits
-        # output = model(**inputs) 
-        # logits = output.logits[:, -1, :]  # 获取最后一个 token 的 logits
-        # # 选择集中选择 ["Yes", "No"]
-        # choice_tokens = tokenizer(["Yes", "No"], return_tensors='pt')['input_ids'].to(DEVICE)
-        # choice_logits = logits[:, choice_tokens.squeeze(-1)]
-        # # 计算 softmax 分数
-        # choice_probs = torch.softmax(choice_logits, dim=-1)
-        # choice_probs = choice_probs.cpu().detach().numpy().flatten()
-        # choice_prob_dict = {
-        #     "Yes": choice_probs[0],
-        #     "No": choice_probs[1]
-        # }
-        full_out_dict = model.generate(**inputs, **gen_kwargs)
-        token_probs = torch.softmax(full_out_dict.scores[0][0], dim=0)
-        slice_idxs = torch.tensor([string2idx[s] for s in params['return_string_probabilities']])
-        string_probs_unnormalized = token_probs[slice_idxs]
-        string_probs = string_probs_unnormalized / string_probs_unnormalized.sum()
-        gen_probabilities = string_probs.cpu().numpy().tolist()
+    if not params['return_string_probabilities']:
+        total_len = 0
+        generated_text = ""
+        with torch.no_grad():
+            model.generate(**inputs, **gen_kwargs)
+            for next_text in streamer:
+                generated_text += next_text
+                yield {
+                    "text": generated_text,
+                    "usage": {
+                        "prompt_tokens": input_echo_len,
+                        "completion_tokens": total_len - input_echo_len,
+                        "total_tokens": total_len,
+                    },
+                    "softmax_scores": [0, 0]
+                }
+        ret = {
+            "text": generated_text,
+            "usage": {
+                "prompt_tokens": input_echo_len,
+                "completion_tokens": total_len - input_echo_len,
+                "total_tokens": total_len,
+            },
+            "softmax_scores": [0, 0]
+        }
+        yield ret
+    
+    else:
+        with torch.no_grad():
+            # # 获取模型的输出 logits
+            # output = model(**inputs) 
+            # logits = output.logits[:, -1, :]  # 获取最后一个 token 的 logits
+            # # 选择集中选择 ["Yes", "No"]
+            # choice_tokens = tokenizer(["Yes", "No"], return_tensors='pt')['input_ids'].to(DEVICE)
+            # choice_logits = logits[:, choice_tokens.squeeze(-1)]
+            # # 计算 softmax 分数
+            # choice_probs = torch.softmax(choice_logits, dim=-1)
+            # choice_probs = choice_probs.cpu().detach().numpy().flatten()
+            # choice_prob_dict = {
+            #     "Yes": choice_probs[0],
+            #     "No": choice_probs[1]
+            # }
+            full_out_dict = model.generate(**inputs, **gen_kwargs)
+            token_probs = torch.softmax(full_out_dict.scores[0][0], dim=0)
+            slice_idxs = torch.tensor([string2idx[s] for s in params['return_string_probabilities']])
+            string_probs_unnormalized = token_probs[slice_idxs]
+            string_probs = string_probs_unnormalized / string_probs_unnormalized.sum()
+            gen_probabilities = string_probs.cpu().numpy().tolist()
 
-        model.generate(**inputs, **gen_kwargs)
-        for next_text in streamer:
-            generated_text += next_text
+            model.generate(**inputs, **gen_kwargs)
+            for next_text in streamer:
+                generated_text += next_text
 
-            yield {
-                "text": generated_text,
-                "usage": {
-                    "prompt_tokens": input_echo_len,
-                    "completion_tokens": total_len - input_echo_len,
-                    "total_tokens": total_len,
-                },
-                "softmax_scores": gen_probabilities
-            }
-    ret = {
-        "text": generated_text,
-        "usage": {
-            "prompt_tokens": input_echo_len,
-            "completion_tokens": total_len - input_echo_len,
-            "total_tokens": total_len,
-        },
-        "softmax_scores": gen_probabilities
-    }
-    yield ret
+                yield {
+                    "text": generated_text,
+                    "usage": {
+                        "prompt_tokens": input_echo_len,
+                        "completion_tokens": total_len - input_echo_len,
+                        "total_tokens": total_len,
+                    },
+                    "softmax_scores": gen_probabilities
+                }
+        ret = {
+            "text": generated_text,
+            "usage": {
+                "prompt_tokens": input_echo_len,
+                "completion_tokens": total_len - input_echo_len,
+                "total_tokens": total_len,
+            },
+            "softmax_scores": gen_probabilities
+        }
+        yield ret
 
 
 gc.collect()
