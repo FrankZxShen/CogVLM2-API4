@@ -170,6 +170,26 @@ async def create_chat_completion(request: ChatCompletionRequest):
         stream=request.stream,
         return_string_probabilities=['Yes', 'No'],
         )
+    elif request.messages[-1].return_string_probabilities == "[A, B, C, D]":
+        gen_params = dict(
+        messages=request.messages,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        max_tokens=request.max_tokens or 1024,
+        echo=False,
+        stream=request.stream,
+        return_string_probabilities=['A', 'B', 'C', 'D'],
+        )
+    elif request.messages[-1].return_string_probabilities == "[A, B, C, D, E]":
+        gen_params = dict(
+        messages=request.messages,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        max_tokens=request.max_tokens or 1024,
+        echo=False,
+        stream=request.stream,
+        return_string_probabilities=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'],
+        )
     elif not request.messages[-1].return_string_probabilities:
         gen_params = dict(
         messages=request.messages,
@@ -364,7 +384,9 @@ def generate_stream_cogvlm(model: AutoModelForCausalLM, tokenizer: AutoTokenizer
     # === Generation Utilities ===
     #   => For computing likelihoods --> get tokens corresponding to "True", "False" and "Yes", "No"
     string2idx = {}
-    for trigger_string in ["True", "False", "Yes", "No"] + [chr(ord("A") + i) for i in range(26)]:
+    space_ = [" A", " B", " C", " D", " E", " F", " G", " H", " I", " J", " K", " L", " M", " N", " O", " P", " Q", " R", " S", " T", " U", " V", " W", " X", " Y", " Z"]
+    for trigger_string in ["True", "False", "Yes", "No", " Yes", " No", " A", " B", " C", " D"] + \
+        space_ + [chr(ord("A") + i) for i in range(26)]:
         token_idx_list = tokenizer.encode(trigger_string, add_special_tokens=False)
         assert len(token_idx_list) == 1, f'String "{trigger_string}" is tokenized as more than one token!'
         string2idx[trigger_string] = token_idx_list[0]
@@ -412,13 +434,29 @@ def generate_stream_cogvlm(model: AutoModelForCausalLM, tokenizer: AutoTokenizer
             #     "No": choice_probs[1]
             # }
             full_out_dict = model.generate(**inputs, **gen_kwargs)
-            token_probs = torch.softmax(full_out_dict.scores[0][0], dim=0)
+            # print("full_out_dict: ", full_out_dict)
+            token_probs = torch.softmax(full_out_dict.scores[0][0], dim=0) 
+            torch.set_printoptions(profile="full")
+            # print("1: ", torch.nonzero(token_probs))
+            torch.set_printoptions(profile="default") # reset
             slice_idxs = torch.tensor([string2idx[s] for s in params['return_string_probabilities']])
+            # print("2: ",slice_idxs)
             string_probs_unnormalized = token_probs[slice_idxs]
+            if string_probs_unnormalized.sum() == 0.0 and len(slice_idxs) == 2:
+                slice_idxs = torch.tensor([string2idx[s] for s in [" Yes", " No"]])
+                string_probs_unnormalized = token_probs[slice_idxs]
+            elif string_probs_unnormalized.sum() == 0.0 and len(slice_idxs) == 4:
+                slice_idxs = torch.tensor([string2idx[s] for s in [" A", " B", " C", " D"]])
+                string_probs_unnormalized = token_probs[slice_idxs]
+            elif string_probs_unnormalized.sum() == 0.0 and len(slice_idxs) > 4:
+                slice_idxs = torch.tensor([string2idx[s] for s in space_])
+                string_probs_unnormalized = token_probs[slice_idxs]
+            # print("3: ", string_probs_unnormalized)
             string_probs = string_probs_unnormalized / string_probs_unnormalized.sum()
+            # print("4: ", string_probs)
             gen_probabilities = string_probs.cpu().numpy().tolist()
 
-            model.generate(**inputs, **gen_kwargs)
+            # model.generate(**inputs, **gen_kwargs)
             for next_text in streamer:
                 generated_text += next_text
 
