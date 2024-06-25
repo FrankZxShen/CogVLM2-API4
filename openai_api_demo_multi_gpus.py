@@ -1,6 +1,7 @@
 import gc
 import time
 import base64
+import random
 
 from contextlib import asynccontextmanager
 from typing import List, Literal, Union, Tuple, Optional
@@ -180,7 +181,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         stream=request.stream,
         return_string_probabilities=['A', 'B', 'C', 'D'],
         )
-    elif request.messages[-1].return_string_probabilities == "[A, B, C, D, E]":
+    elif request.messages[-1].return_string_probabilities == "[1, 2, 3, 4]":
         gen_params = dict(
         messages=request.messages,
         temperature=request.temperature,
@@ -188,7 +189,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         max_tokens=request.max_tokens or 1024,
         echo=False,
         stream=request.stream,
-        return_string_probabilities=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'],
+        return_string_probabilities=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26'],
         )
     elif not request.messages[-1].return_string_probabilities:
         gen_params = dict(
@@ -384,9 +385,18 @@ def generate_stream_cogvlm(model: AutoModelForCausalLM, tokenizer: AutoTokenizer
     # === Generation Utilities ===
     #   => For computing likelihoods --> get tokens corresponding to "True", "False" and "Yes", "No"
     string2idx = {}
-    space_ = [" A", " B", " C", " D", " E", " F", " G", " H", " I", " J", " K", " L", " M", " N", " O", " P", " Q", " R", " S", " T", " U", " V", " W", " X", " Y", " Z"]
-    for trigger_string in ["True", "False", "Yes", "No", " Yes", " No", " A", " B", " C", " D"] + \
-        space_ + [chr(ord("A") + i) for i in range(26)]:
+    space_ = [" A", " B", " C", " D"]
+    ALL_space_ = [" A", " B", " C", " D", " E", " F", " G", " H", " I", " J", " K", " L", " M", " N", " O", " P", " Q", " R", " S", " T", " U", " V", " W", " X", " Y", " Z"]
+    # line_ = ["\nA", "\nB", "\nC", "\nD", "\nE", "\nF", "\nG", "\nH", "\nI", "\nJ", "\nK", "\nL", "\nM", "\nN", "\nO", "\nP", "\nQ", "\nR", "\nS", "\nT", "\nU", "\nV", "\nW", "\nX", "\nY", "\nZ"]
+    # space_line_ = [' \nA', ' \nB', ' \nC', ' \nD', ' \nE', ' \nF', ' \nG', ' \nH', ' \nI', ' \nJ', ' \nK', ' \nL', ' \nM', ' \nN', ' \nO', ' \nP', ' \nQ', ' \nR', ' \nS', ' \nT', ' \nU', ' \nV', ' \nW', ' \nX', ' \nY', ' \nZ']
+    nums = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26']
+    # nums_space_ = [' 1', ' 2', ' 3', ' 4', ' 5', ' 6', ' 7', ' 8', ' 9', ' 10', ' 11', ' 12', ' 13', ' 14', ' 15', ' 16', ' 17', ' 18', ' 19', ' 20', ' 21', ' 22', ' 23', ' 24', ' 25', ' 26']
+    # nums_line_ = ['\n1', '\n2', '\n3', '\n4', '\n5', '\n6', '\n7', '\n8', '\n9', '\n10', '\n11', '\n12', '\n13', '\n14', '\n15', '\n16', '\n17', '\n18', '\n19', '\n20', '\n21', '\n22', '\n23', '\n24', '\n25', '\n26']
+    # nums_space_line_ = [' \n1', ' \n2', ' \n3', ' \n4', ' \n5', ' \n6', ' \n7', ' \n8', ' \n9', ' \n10', ' \n11', ' \n12', ' \n13', ' \n14', ' \n15', ' \n16', ' \n17', ' \n18', ' \n19', ' \n20', ' \n21', ' \n22', ' \n23', ' \n24', ' \n25', ' \n26']
+    ALL_PARAMAS = ["True", "False", "Yes", "No", " Yes", " No", ] + \
+        [chr(ord("A") + i) for i in range(26)]+ space_ + ALL_space_  \
+        + nums
+    for trigger_string in ALL_PARAMAS:
         token_idx_list = tokenizer.encode(trigger_string, add_special_tokens=False)
         assert len(token_idx_list) == 1, f'String "{trigger_string}" is tokenized as more than one token!'
         string2idx[trigger_string] = token_idx_list[0]
@@ -451,10 +461,17 @@ def generate_stream_cogvlm(model: AutoModelForCausalLM, tokenizer: AutoTokenizer
             elif string_probs_unnormalized.sum() == 0.0 and len(slice_idxs) > 4:
                 slice_idxs = torch.tensor([string2idx[s] for s in space_])
                 string_probs_unnormalized = token_probs[slice_idxs]
-            # print("3: ", string_probs_unnormalized)
-            string_probs = string_probs_unnormalized / string_probs_unnormalized.sum()
-            # print("4: ", string_probs)
-            gen_probabilities = string_probs.cpu().numpy().tolist()
+            
+
+            if string_probs_unnormalized.sum() == 0.0:
+                rand_list = [random.random() for _ in range(len(slice_idxs))]
+                total_sum = sum(rand_list)
+                gen_probabilities = [num/total_sum for num in rand_list]
+            else:
+                # print("3: ", string_probs_unnormalized)
+                string_probs = string_probs_unnormalized / string_probs_unnormalized.sum()
+                # print("4: ", string_probs)
+                gen_probabilities = string_probs.cpu().numpy().tolist()
 
             # model.generate(**inputs, **gen_kwargs)
             for next_text in streamer:
